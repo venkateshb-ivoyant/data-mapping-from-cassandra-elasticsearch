@@ -5,14 +5,18 @@ import com.ivoyant.MappingCassandraToElasticSearch.entity.ElasticStudent;
 import com.ivoyant.MappingCassandraToElasticSearch.entity.Student;
 import com.ivoyant.MappingCassandraToElasticSearch.repository.StudentElasticSearchRepository;
 import com.ivoyant.MappingCassandraToElasticSearch.service.CassandraStudentService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -24,7 +28,10 @@ public class StudentElasticSearchController {
    @Autowired
    private StudentElasticSearchRepository studentElasticSearchRepository;
 
-   /*@PostMapping("loadAll")
+    private static final Logger LOGGER = LoggerFactory.getLogger(StudentElasticSearchController.class);
+
+
+    /*@PostMapping("loadAll")
   public List<ElasticStudent>saveStudent() throws JsonProcessingException {
        List<ElasticStudent> student2 = (List<ElasticStudent>) cassandraStudentService.getStudents();
        for (ElasticStudent Student1:student2) {
@@ -32,20 +39,61 @@ public class StudentElasticSearchController {
        }
         return student2;
     }*/
+    /*@PostMapping("insertMultipleRecords")
+    public ResponseEntity<HttpStatus> insert(@RequestBody List<ElasticStudent> elasticStudents){
+        try {
+            for (ElasticStudent elasticStudent:elasticStudents){
+                studentElasticSearchRepository.save(elasticStudent);
+            }
+        }catch (Exception e){
+            LOGGER.info(e.getMessage());
+
+        }
+
+        return ResponseEntity.ok(HttpStatus.CREATED);
+    }*/
+
+    private final Executor asyncExecutor;
+
+    @Autowired
+    public StudentElasticSearchController(StudentElasticSearchRepository studentElasticSearchRepository, Executor asyncExecutor) {
+        this.studentElasticSearchRepository = studentElasticSearchRepository;
+        this.asyncExecutor = asyncExecutor;
+    }
+
+    @PostMapping("/insertMultipleRecords")
+    public ResponseEntity<HttpStatus> insert(@RequestBody List<ElasticStudent> elasticStudents) {
+        CompletableFuture.runAsync(() -> insertAsync(elasticStudents), asyncExecutor);
+        return ResponseEntity.accepted().build();
+    }
+
+    private void insertAsync(List<ElasticStudent> elasticStudents) {
+        try {
+            for (ElasticStudent elasticStudent : elasticStudents) {
+                studentElasticSearchRepository.save(elasticStudent);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error inserting students asynchronously: " + e.getMessage());
+        }
+    }
    @PostMapping("loadAll")
-   public List<ElasticStudent> saveStudent() throws JsonProcessingException {
-       List<Student> cassandraStudents = cassandraStudentService.getStudents();
+   public ResponseEntity<HttpStatus> saveStudent() throws JsonProcessingException {
+        try {
+            List<Student> cassandraStudents = cassandraStudentService.getStudents();
 
-       List<ElasticStudent> elasticStudents = StreamSupport.stream(cassandraStudents.spliterator(), false)
-               .map(this::convertToElasticStudent)
-               .collect(Collectors.toList());
+            List<ElasticStudent> elasticStudents = StreamSupport.stream(cassandraStudents.spliterator(), false)
+                    .map(this::convertToElasticStudent)
+                    .collect(Collectors.toList());
 
-       List<ElasticStudent> savedStudents = new ArrayList<>();
-       for (ElasticStudent elasticStudent : elasticStudents) {
-           savedStudents.add(studentElasticSearchRepository.save(elasticStudent));
-       }
+           // List<ElasticStudent> savedStudents = new ArrayList<>();
+            for (ElasticStudent elasticStudent : elasticStudents) {
+                studentElasticSearchRepository.save(elasticStudent);
+            }
+        }catch (Exception e){
+            LOGGER.info(e.getMessage());
+        }
 
-       return savedStudents;
+       return ResponseEntity.ok(HttpStatus.CREATED);
    }
 
     private ElasticStudent convertToElasticStudent(Student student) {
